@@ -60,7 +60,7 @@ const val SCAN = """
 (async function(){
 var found={};
 var srcs=[].slice.call(document.scripts).map(function(s){return s.src}).filter(Boolean);
-var re=/["'`]((?:https?:\/\/[^"'`\s]+)?\/(?:api|rest|graphql|ajax|services?|v[0-9]+)\/[^"'`\s<>]*)["'`]/gi;
+var re=/["'`]((?:https?:\/\/[^"'`\s]+)?\/?[A-Za-z0-9_\-\/]+\.json(?:\?[^"'`\s<>]*)?|(?:https?:\/\/[^"'`\s]+)?\/(?:api|rest|graphql|ajax|services?|v[0-9]+)\/[^"'`\s<>]*)["'`]/gi;
 for(var k=0;k<srcs.length;k++){try{
  var t=await (await fetch(srcs[k])).text();var m;
  while((m=re.exec(t)))found[m[1]]=1}catch(e){}}
@@ -88,7 +88,7 @@ class MainActivity : Activity() {
     private val queue = ArrayDeque<String>()
     private val visited = HashSet<String>()
     private val noise = Regex(
-        "google-analytics|googletagmanager|doubleclick|facebook|hotjar|clarity\\.ms|sentry|segment|mixpanel|adservice|firebaselogging|gstatic",
+        "google-analytics|googletagmanager|doubleclick|facebook|hotjar|clarity\\.ms|sentry|segment|mixpanel|adservice|firebaselogging|gstatic|iconify|unisvg|browser-session-activity|getLoginPageConfiguration|getBanner|ProfileImage|ServerUserNotification",
         RegexOption.IGNORE_CASE
     )
 
@@ -100,10 +100,11 @@ class MainActivity : Activity() {
                 if (noise.containsMatchIn(u)) return
                 val b = o.getString("b").trim()
                 if (!(b.startsWith("{") || b.startsWith("["))) return
-                val sb = StringBuilder()
-                flat(JSONTokener(b).nextValue(), "", sb)
+                val lines = ArrayList<String>()
+                flat(JSONTokener(b).nextValue(), "", lines)
                 val m = o.getString("m").uppercase()
-                val text = "$m ${o.getInt("s")}\n$u\n$sb"
+                val path = u.substringAfter("//").substringAfter("/")
+                val text = "▶ $m /$path\n" + (if (lines.isEmpty()) "  (empty)" else lines.joinToString("\n")) + "\n"
                 ui.post { caps["$m $u"] = text; resBtn.text = "Results (${caps.size})" }
             } catch (e: Exception) { }
         }
@@ -126,13 +127,23 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun flat(v: Any?, p: String, out: StringBuilder) {
-        if (out.length > 4000) return
+    private fun clean(s: String): String {
+        var t = s
+        if (t.contains("%3C") || t.contains("%20")) t = try { java.net.URLDecoder.decode(t, "UTF-8") } catch (e: Exception) { t }
+        t = t.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()
+        return if (t.length > 60) t.take(60) + "…" else t
+    }
+
+    private fun flat(v: Any?, p: String, out: MutableList<String>) {
+        if (out.size >= 12) return
         when (v) {
             is JSONObject -> v.keys().forEach { flat(v.get(it), if (p.isEmpty()) it else "$p.$it", out) }
-            is JSONArray -> for (i in 0 until minOf(v.length(), 5)) flat(v.get(i), "$p[$i]", out)
+            is JSONArray -> if (v.length() > 0) {
+                flat(v.get(0), "$p[0]", out)
+                if (v.length() > 1) out.add("  ($p has ${v.length()} items)")
+            }
             JSONObject.NULL -> {}
-            else -> out.append("  $p = $v\n")
+            else -> { val x = clean(v.toString()); if (x.isNotEmpty()) out.add("  $p: $x") }
         }
     }
 
