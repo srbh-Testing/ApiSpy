@@ -82,6 +82,10 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var urlBox: EditText
     private lateinit var resBtn: Button
+    private lateinit var expBtn: Button
+    private var total = 0
+    private val pages = LinkedHashSet<String>()
+    private val badPage = Regex("logout|signout|sign-out|delete|remove|login", RegexOption.IGNORE_CASE)
     private val ui = Handler(Looper.getMainLooper())
     private val caps = LinkedHashMap<String, String>()
     private val hidden = LinkedHashSet<String>()
@@ -100,6 +104,8 @@ class MainActivity : Activity() {
                 if (noise.containsMatchIn(u)) return
                 val b = o.getString("b").trim()
                 if (!(b.startsWith("{") || b.startsWith("["))) return
+                Regex("[A-Za-z0-9_\\-/]+\\.htm\\b").findAll(b).map { it.value }
+                    .filter { !badPage.containsMatchIn(it) }.forEach { x -> ui.post { pages.add(x) } }
                 val lines = ArrayList<String>()
                 flat(JSONTokener(b).nextValue(), "", lines)
                 val m = o.getString("m").uppercase()
@@ -118,8 +124,15 @@ class MainActivity : Activity() {
                     if (queue.isEmpty()) {
                         for (i in 0 until a.length()) {
                             val l = a.getString(i)
-                            if (queue.size < 8 && visited.add(l)) queue.add(l)
+                            if (queue.size < 40 && visited.add(l)) queue.add(l)
                         }
+                        val cur = web.url ?: ""
+                        val base = cur.substringBefore("://") + "://" + cur.substringAfter("://").substringBefore("/")
+                        for (p in pages) {
+                            val l = if (p.startsWith("http")) p else base + "/" + p.trimStart('/')
+                            if (queue.size < 40 && visited.add(l)) queue.add(l)
+                        }
+                        total = queue.size
                         if (queue.isNotEmpty()) next() else toast("Explore done")
                     }
                 }
@@ -150,18 +163,18 @@ class MainActivity : Activity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     private fun next() {
-        val u = queue.removeFirstOrNull() ?: run { toast("Explore done"); return }
+        val u = queue.removeFirstOrNull() ?: run { expBtn.text = "Auto-explore"; toast("Explore done"); return }
+        expBtn.text = "Exploring ${total - queue.size}/$total"
         web.loadUrl(u)
         ui.postDelayed({
             web.evaluateJavascript(STEP, null)
-            web.evaluateJavascript(SCAN, null)
-            ui.postDelayed({ next() }, 4000)
-        }, 4000)
+            ui.postDelayed({ next() }, 2000)
+        }, 3500)
     }
 
     private fun explore() {
         toast("Exploring...")
-        visited.add(web.url ?: "")
+        visited.clear(); queue.clear(); visited.add(web.url ?: "")
         web.evaluateJavascript(STEP, null)
         web.evaluateJavascript(SCAN, null)
         ui.postDelayed({ web.evaluateJavascript(LINKS, null) }, 2500)
@@ -217,7 +230,7 @@ class MainActivity : Activity() {
         web = WebView(this)
         root.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        val expBtn = Button(this).apply { text = "Auto-explore"; setOnClickListener { explore() } }
+        expBtn = Button(this).apply { text = "Auto-explore"; setOnClickListener { explore() } }
         resBtn = Button(this).apply { text = "Results (0)"; setOnClickListener { showResults() } }
         val w = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }
         root.addView(LinearLayout(this).apply { addView(expBtn, w()); addView(resBtn, w()) })
